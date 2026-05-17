@@ -3,7 +3,7 @@ BUILD_DIR = build
 
 CC = gcc
 CFLAGS = -Wall -Iinclude
-LDFLAGS =
+LDFLAGS = -lssl -lcrypto
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SOURCES))
