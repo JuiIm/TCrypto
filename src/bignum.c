@@ -1,4 +1,5 @@
 #include "bignum.h"
+#include <openssl/rand.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -425,4 +426,277 @@ void bn_divmod(bignum_t *q, bignum_t *r, const bignum_t *a, const bignum_t *b)
 		bn_copy(q, &Q);
 	if (r)
 		bn_copy(r, &R);
+}
+
+void bn_mod(bignum_t *r, const bignum_t *a, const bignum_t *n)
+{
+	bignum_t rem;
+	bn_divmod(NULL, &rem, a, n);
+	if (rem.sign)
+		bn_add(&rem, &rem, n);
+	bn_copy(r, &rem);
+}
+
+void bn_mod_add(bignum_t *r, const bignum_t *a, const bignum_t *b,
+		const bignum_t *n)
+{
+	bignum_t sum;
+	bn_add(&sum, a, b);
+	bn_mod(r, &sum, n);
+}
+
+void bn_mod_sub(bignum_t *r, const bignum_t *a, const bignum_t *b,
+		const bignum_t *n)
+{
+	bignum_t diff;
+	bn_sub(&diff, a, b);
+	bn_mod(r, &diff, n);
+}
+
+void bn_mod_mul(bignum_t *r, const bignum_t *a, const bignum_t *b,
+		const bignum_t *n)
+{
+	bignum_t prod;
+	bn_mul(&prod, a, b);
+	bn_mod(r, &prod, n);
+}
+
+/* Left to right fast exponentiation we covered in class*/
+void bn_mod_exp(bignum_t *r, const bignum_t *base, const bignum_t *exp,
+		const bignum_t *mod)
+{
+	if (bn_is_one(mod)) {
+		bn_init(r);
+		return;
+	}
+
+	bignum_t result, b;
+	bn_set_word(&result, 1);
+	bn_mod(&b, base, mod);
+
+	int exp_bits = bn_bit_len(exp);
+
+	for (int i = exp_bits - 1; i >= 0; i--) {
+		bn_mod_mul(&result, &result, &result, mod);
+		if (bn_get_bit(exp, i)) {
+			bn_mod_mul(&result, &result, &b, mod);
+		}
+	}
+
+	bn_copy(r, &result);
+}
+
+void bn_gcd(bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	bignum_t x, y, tmp;
+	bn_copy(&x, a);
+	x.sign = 0;
+	bn_copy(&y, b);
+	y.sign = 0;
+
+	while (!bn_is_zero(&y)) {
+		bn_mod(&tmp, &x, &y);
+		bn_copy(&x, &y);
+		bn_copy(&y, &tmp);
+	}
+	bn_copy(r, &x);
+}
+
+void bn_mod_inv(bignum_t *r, const bignum_t *a, const bignum_t *n)
+{
+	bignum_t old_r, rr, old_s, s, quotient, tmp, tmp2;
+
+	bn_copy(&old_r, n);
+	bn_mod(&rr, a, n);
+	bn_init(&old_s);
+	bn_set_word(&s, 1);
+
+	while (!bn_is_zero(&rr)) {
+		bn_divmod(&quotient, NULL, &old_r, &rr);
+
+		bn_copy(&tmp, &rr);
+		bn_mul(&tmp2, &quotient, &rr);
+		bn_sub(&rr, &old_r, &tmp2);
+		bn_copy(&old_r, &tmp);
+
+		bn_copy(&tmp, &s);
+		bn_mul(&tmp2, &quotient, &s);
+		bn_sub(&s, &old_s, &tmp2);
+		bn_copy(&old_s, &tmp);
+	}
+
+	if (old_s.sign)
+		bn_add(r, &old_s, n);
+	else
+		bn_copy(r, &old_s);
+}
+
+void bn_from_bytes(bignum_t *a, const uint8_t *buf, size_t len)
+{
+	bn_init(a);
+	if (len == 0)
+		return;
+
+	while (len > 0 && *buf == 0) {
+		buf++;
+		len--;
+	}
+	if (len == 0)
+		return;
+
+	int nlimbs = (int)((len + 3) / 4);
+	if (nlimbs > BN_MAX_LIMBS) {
+		fprintf(stderr, "bn_from_bytes: too large\n");
+		return;
+	}
+	a->len = nlimbs;
+
+	for (int i = 0; i < len; i++) {
+		int limb_idx = (int)(i / 4);
+		int shift = (int)((i % 4) * 8);
+		a->limbs[limb_idx] |= (uint32_t)buf[len - 1 - i] << shift;
+	}
+	bn_trim(a);
+}
+
+void bn_to_bytes(const bignum_t *a, uint8_t *buf, size_t len)
+{
+	memset(buf, 0, len);
+	for (int i = 0; i < a->len; i++) {
+		uint32_t limb = a->limbs[i];
+		for (int j = 0; j < 4; j++) {
+			size_t byte_idx = (size_t)(i * 4 + j);
+			if (byte_idx >= len)
+				return;
+			buf[len - 1 - byte_idx] = (uint8_t)(limb >> (j * 8));
+		}
+	}
+}
+
+void bn_print_hex(const bignum_t *a)
+{
+	if (a->sign)
+		printf("-");
+	int start = a->len - 1;
+	printf("%x", a->limbs[start]);
+	for (int i = start - 1; i >= 0; i--)
+		printf("%08x", a->limbs[i]);
+}
+
+void bn_rand(bignum_t *a, int bits)
+{
+	if (bits <= 0) {
+		bn_init(a);
+		return;
+	}
+
+	int byte_len = (bits + 7) / 8;
+	uint8_t *buf = (uint8_t *)calloc((size_t)byte_len, 1);
+	if (!buf) {
+		fprintf(stderr, "bn_rand: alloc failed\n");
+		exit(1);
+	}
+
+	RAND_bytes(buf, byte_len);
+
+	int excess = byte_len * 8 - bits;
+	if (excess > 0)
+		buf[0] &= (uint8_t)(0xFF >> excess);
+
+	int top_bit = (bits - 1) % 8;
+	buf[0] |= (uint8_t)(1 << top_bit);
+
+	bn_from_bytes(a, buf, (size_t)byte_len);
+	a->sign = 0;
+	free(buf);
+}
+
+static const uint16_t small_primes[] = {
+    3,	 5,   7,   11,	13,  17,  19,  23,  29,	 31,  37,  41,	43,  47,
+    53,	 59,  61,  67,	71,  73,  79,  83,  89,	 97,  101, 103, 107, 109,
+    113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191,
+    193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269,
+    271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353,
+    359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439,
+    443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523,
+    541, 547, 557, 563, 569, 571, 577, 587, 593, 599, 601, 607, 613, 617,
+    619, 631, 641, 643, 647, 653, 659, 661, 673, 677, 683, 691, 701, 709,
+    719, 727, 733, 739, 743, 751, 757, 761, 769, 773, 787, 797, 809, 811,
+    821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907,
+    911, 919, 929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997};
+#define NUM_SMALL_PRIMES (sizeof(small_primes) / sizeof(small_primes[0]))
+
+bool bn_is_prime_mr(const bignum_t *n, int rounds)
+{
+	if (bn_is_zero(n) || bn_is_one(n))
+		return false;
+
+	bignum_t two, three;
+	bn_set_word(&two, 2);
+	bn_set_word(&three, 3);
+
+	if (bn_cmp(n, &two) == 0 || bn_cmp(n, &three) == 0)
+		return true;
+	if (bn_is_even(n))
+		return false;
+
+	/* Trial division by small primes */
+	for (size_t i = 0; i < NUM_SMALL_PRIMES; i++) {
+		bignum_t sp, rem;
+		bn_set_word(&sp, small_primes[i]);
+		if (bn_cmp(n, &sp) == 0)
+			return true;
+		bn_mod(&rem, n, &sp);
+		if (bn_is_zero(&rem))
+			return false;
+	}
+
+	/* Write n-1 = 2^s * d where d is odd */
+	bignum_t n_minus_1, d, one;
+	bn_set_word(&one, 1);
+	bn_sub(&n_minus_1, n, &one);
+	bn_copy(&d, &n_minus_1);
+
+	int s = 0;
+	while (bn_is_even(&d)) {
+		bn_shr(&d, 1);
+		s++;
+	}
+
+	/* Miller-Rabin rounds */
+	for (int i = 0; i < rounds; i++) {
+		bignum_t a;
+		int n_bits = bn_bit_len(n);
+		do {
+			bn_rand(&a, n_bits);
+			bn_mod(&a, &a, n);
+		} while (bn_cmp(&a, &two) < 0 || bn_cmp(&a, &n_minus_1) >= 0);
+
+		bignum_t x;
+		bn_mod_exp(&x, &a, &d, n);
+
+		if (bn_is_one(&x) || bn_cmp(&x, &n_minus_1) == 0)
+			continue;
+
+		bool found = false;
+		for (int j = 0; j < s - 1; j++) {
+			bn_mod_mul(&x, &x, &x, n);
+			if (bn_cmp(&x, &n_minus_1) == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return false;
+	}
+
+	return true;
+}
+
+void bn_gen_prime(bignum_t *p, int bits)
+{
+	do {
+		bn_rand(p, bits);
+		p->limbs[0] |= 1; /* ensure odd */
+	} while (!bn_is_prime_mr(p, 40));
 }
