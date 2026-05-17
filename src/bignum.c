@@ -50,7 +50,8 @@ int bn_cmp_abs(const bignum_t *a, const bignum_t *b)
 int bn_cmp(const bignum_t *a, const bignum_t *b)
 {
 	if (a->sign != b->sign) {
-		if (bn_is_zero(a) && bn_is_zero(b)) return 0;
+		if (bn_is_zero(a) && bn_is_zero(b))
+			return 0;
 		return a->sign ? -1 : 1;
 	}
 
@@ -179,6 +180,56 @@ void bn_shl(bignum_t *a, int bits)
 	bn_trim(a);
 }
 
+void bn_from_hex(bignum_t *a, const char *hex)
+{
+	bn_init(a);
+	if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+		hex += 2;
+
+	size_t slen = strlen(hex);
+	if (slen == 0)
+		return;
+
+	size_t byte_len = (slen + 1) / 2;
+	uint8_t bytes[512] = {0};
+
+	for (size_t i = 0; i < slen; i++) {
+		char c = hex[slen - 1 - i];
+		uint8_t v;
+		if (c >= '0' && c <= '9')
+			v = (uint8_t)(c - '0');
+		else if (c >= 'a' && c <= 'f')
+			v = (uint8_t)(c - 'a' + 10);
+		else if (c >= 'A' && c <= 'F')
+			v = (uint8_t)(c - 'A' + 10);
+		else
+			return;
+
+		size_t bi = byte_len - 1 - i / 2;
+		if (i % 2 == 0)
+			bytes[bi] = v;
+		else
+			bytes[bi] |= (uint8_t)(v << 4);
+	}
+
+	while (byte_len > 0 && bytes[0] == 0) {
+		bytes[0] = bytes[1];
+		memmove(bytes, bytes + 1, byte_len - 1);
+		byte_len--;
+	}
+
+	int nlimbs = (int)((byte_len + 3) / 4);
+	a->len = nlimbs > 0 ? nlimbs : 1;
+
+	for (size_t i = 0; i < byte_len; i++) {
+		int limb_idx = (int)(i / 4);
+		int shift = (int)((i % 4) * 8);
+		a->limbs[limb_idx] |= (uint32_t)bytes[byte_len - 1 - i]
+				      << shift;
+	}
+	bn_trim(a);
+}
+
 void bn_add_abs(bignum_t *r, const bignum_t *a, const bignum_t *b)
 {
 	bignum_t tmp;
@@ -189,13 +240,119 @@ void bn_add_abs(bignum_t *r, const bignum_t *a, const bignum_t *b)
 
 	for (int i = 0; i < max_len || carry; i++) {
 		uint64_t sum = carry;
-		if (i < a->len) sum += (uint64_t)a->limbs[i];
-		if (i < b->len) sum += (uint64_t)b->limbs[i];
+		if (i < a->len)
+			sum += (uint64_t)a->limbs[i];
+		if (i < b->len)
+			sum += (uint64_t)b->limbs[i];
 		tmp.limbs[i] = (uint32_t)(sum & 0xFFFFFFFF);
 		carry = sum >> 32;
 		tmp.len = i + 1;
 	}
 
+	bn_trim(&tmp);
+	bn_copy(r, &tmp);
+}
+
+/* This assumes a >= b since we are performing unsigned subtraction */
+void bn_sub_abs(bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	bignum_t tmp;
+	bn_init(&tmp);
+
+	uint64_t borrow = 0;
+
+	if (a->len < b->len) {
+		fprintf(stderr, "bn_sub_abs: a < b\n");
+		return;
+	}
+
+	for (int i = 0; i < a->len; i++) {
+		int64_t diff = (int64_t)a->limbs[i] - borrow;
+		if (i < b->len)
+			diff -= (int64_t)b->limbs[i];
+		if (diff < 0) {
+			diff += BN_BASE;
+			borrow = 1;
+		} else {
+			borrow = 0;
+		}
+		tmp.limbs[i] = (uint32_t)(diff & 0xFFFFFFFF);
+		tmp.len = i + 1;
+	}
+
+	bn_trim(&tmp);
+	bn_copy(r, &tmp);
+}
+
+void bn_add(bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	if (a->sign == b->sign) {
+		bn_add_abs(r, a, b);
+		r->sign = a->sign;
+	} else {
+		int cmp = bn_cmp_abs(a, b);
+		if (cmp == 0) {
+			bn_init(r);
+		} else if (cmp > 0) {
+			bn_sub_abs(r, a, b);
+			r->sign = a->sign;
+		} else {
+			bn_sub_abs(r, b, a);
+			r->sign = b->sign;
+		}
+	}
+}
+
+void bn_sub(bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	if (a->sign != b->sign) {
+		bn_add_abs(r, a, b);
+		r->sign = a->sign;
+	} else {
+		int cmp = bn_cmp_abs(a, b);
+		if (cmp == 0) {
+			bn_init(r);
+		} else if (cmp > 0) {
+			bn_sub_abs(r, a, b);
+			r->sign = a->sign;
+		} else {
+			bn_sub_abs(r, b, a);
+			r->sign = !b->sign;
+		}
+	}
+}
+
+void bn_mul(bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	bignum_t tmp;
+	bn_init(&tmp);
+
+	if (bn_is_zero(a) || bn_is_zero(b)) {
+		bn_copy(r, &tmp);
+		return;
+	}
+
+	int rlen = a->len + b->len;
+	if (rlen > BN_MAX_LIMBS) {
+		fprintf(stderr, "bn_mul: overflow (%d limbs)\n", rlen);
+		return;
+	}
+	tmp.len = rlen;
+
+	for (int i = 0; i < a->len; i++) {
+		uint64_t carry = 0;
+		for (int j = 0; j < b->len; j++) {
+			uint64_t prod =
+			    (uint64_t)a->limbs[i] * (uint64_t)b->limbs[j] +
+			    (uint64_t)tmp.limbs[i + j] + carry;
+			tmp.limbs[i + j] = (uint32_t)(prod & 0xFFFFFFFF);
+			carry = prod >> 32;
+		}
+		if (carry)
+			tmp.limbs[i + b->len] += (uint32_t)carry;
+	}
+
+	tmp.sign = a->sign ^ b->sign;
 	bn_trim(&tmp);
 	bn_copy(r, &tmp);
 }
