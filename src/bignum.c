@@ -356,3 +356,73 @@ void bn_mul(bignum_t *r, const bignum_t *a, const bignum_t *b)
 	bn_trim(&tmp);
 	bn_copy(r, &tmp);
 }
+
+/* We use the restoring division algorithm we covered in the first semester*/
+void bn_divmod(bignum_t *q, bignum_t *r, const bignum_t *a, const bignum_t *b)
+{
+	if (bn_is_zero(b)) {
+		fprintf(stderr, "bn_divmod: division by zero\n");
+		return;
+	}
+
+	if (bn_cmp_abs(a, b) < 0) {
+		if (q)
+			bn_init(q);
+		if (r) {
+			bn_copy(r, a);
+			r->sign = 0;
+		}
+		return;
+	}
+
+	if (bn_cmp_abs(a, b) == 0) {
+		if (q)
+			bn_set_word(q, 1);
+		if (r)
+			bn_init(r);
+		return;
+	}
+
+	if (b->len == 1) {
+		uint32_t d = b->limbs[0];
+		bignum_t Q;
+		bn_init(&Q);
+		Q.len = a->len;
+		uint64_t carry = 0;
+
+		for (int i = a->len - 1; i >= 0; i--) {
+			uint64_t cur = (carry << 32) | a->limbs[i];
+			Q.limbs[i] = (uint32_t)(cur / d);
+			carry = cur % d;
+		}
+		bn_trim(&Q);
+
+		if (q)
+			bn_copy(q, &Q);
+		if (r)
+			bn_set_word(r, (uint32_t)carry);
+		return;
+	}
+
+	bignum_t R, Q;
+	bn_init(&R);
+	bn_init(&Q);
+	int n = bn_bit_len(a);
+
+	for (int i = n - 1; i >= 0; i--) {
+		bn_shl(&R, 1);
+
+		if (bn_get_bit(a, i))
+			R.limbs[0] |= 1;
+
+		if (bn_cmp_abs(&R, b) >= 0) {
+			bn_sub_abs(&R, &R, b);
+			bn_set_bit(&Q, i);
+		}
+	}
+
+	if (q)
+		bn_copy(q, &Q);
+	if (r)
+		bn_copy(r, &R);
+}
