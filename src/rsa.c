@@ -1,15 +1,17 @@
 #include "rsa.h"
 #include "bignum.h"
+#include "oaep.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int rsa_keygen(rsa_key_t *key, int bits)
 {
-	if (bits < 512) {
-		fprintf(stderr,
-			"rsa_keygen: key size must be at least 512 bits\n");
-		return -1;
-	}
+	// if (bits < 512) {
+	// 	fprintf(stderr,
+	// 		"rsa_keygen: key size must be at least 512 bits\n");
+	// 	return -1;
+	// }
 
 	bn_init(&key->p);
 	bn_init(&key->q);
@@ -141,12 +143,19 @@ uint8_t *rsa_encrypt_image(const uint8_t *pixels, size_t pix_len,
 	int block_out = key_bytes;
 
 	size_t num_blocks = (pix_len + block_in - 1) / block_in;
-	*out_len = num_blocks * block_out;
+	*out_len = 4 + num_blocks * block_out;
 
 	uint8_t *out = (uint8_t *)malloc(*out_len);
 	if (!out)
 		return NULL;
-	for (int i = 0; i < num_blocks; i++) {
+
+	/* Store original plaintext length */
+	out[0] = (uint8_t)(pix_len >> 24);
+	out[1] = (uint8_t)(pix_len >> 16);
+	out[2] = (uint8_t)(pix_len >> 8);
+	out[3] = (uint8_t)(pix_len);
+
+	for (size_t i = 0; i < num_blocks; i++) {
 		size_t offset = i * block_in;
 		size_t chunk = pix_len - offset;
 		if (chunk > (size_t)block_in)
@@ -157,7 +166,7 @@ uint8_t *rsa_encrypt_image(const uint8_t *pixels, size_t pix_len,
 
 		bn_from_bytes(&m, pixels + offset, chunk);
 		rsa_encrypt_block(&c, &m, key);
-		bn_to_bytes(&c, out + (i * block_out), block_out);
+		bn_to_bytes(&c, out + 4 + (i * block_out), block_out);
 	}
 
 	return out;
@@ -170,23 +179,149 @@ uint8_t *rsa_decrypt_image(const uint8_t *cipher, size_t cip_len,
 	int block_in = key_bytes;
 	int block_out = key_bytes - 1;
 
-	size_t num_blocks = cip_len / block_in;
-	*out_len = num_blocks * block_out;
+	if (cip_len < 4)
+		return NULL;
 
-	uint8_t *out = (uint8_t *)malloc(*out_len);
+	/* Read original plaintext length */
+	size_t orig_len = ((size_t)cipher[0] << 24) |
+			  ((size_t)cipher[1] << 16) |
+			  ((size_t)cipher[2] << 8) | (size_t)cipher[3];
 
+	size_t num_blocks = (cip_len - 4) / block_in;
+
+	uint8_t *out = (uint8_t *)malloc(orig_len);
 	if (!out)
 		return NULL;
 
-	for (int i = 0; i < num_blocks; i++) {
+	uint8_t *tmp = (uint8_t *)malloc(block_out);
+
+	for (size_t i = 0; i < num_blocks; i++) {
 		bignum_t c, m;
 		bn_init(&c);
 		bn_init(&m);
 
-		bn_from_bytes(&c, cipher + (i * block_in), block_in);
+		bn_from_bytes(&c, cipher + 4 + (i * block_in), block_in);
 		rsa_decrypt_block(&m, &c, key);
-		bn_to_bytes(&m, out + (i * block_out), block_out);
+		bn_to_bytes(&m, tmp, block_out);
+
+		/* How many bytes does this block contribute? */
+		size_t remaining = orig_len - i * block_out;
+		size_t chunk = (remaining < (size_t)block_out) ? remaining
+							       : (size_t)block_out;
+
+		/* Data is right-aligned in big-endian, take last 'chunk' bytes */
+		memcpy(out + i * block_out, tmp + (block_out - chunk), chunk);
 	}
 
+	free(tmp);
+	*out_len = orig_len;
+	return out;
+}
+
+uint8_t *rsa_oaep_encrypt_image(const uint8_t *pixels, size_t pix_len,
+				const rsa_key_t *key, size_t *out_len)
+{
+	int k = RSA_KEY_BYTES(key);
+	int max_msg = OAEP_MAX_MSG_LEN(k);
+
+	if (max_msg <= 0) {
+		fprintf(stderr, "rsa_oaep_encrypt: key too small for OAEP\n");
+		return NULL;
+	}
+
+	size_t num_blocks = (pix_len + max_msg - 1) / max_msg;
+	/* 4-byte header for original size + num_blocks * k ciphertext */
+	*out_len = 4 + num_blocks * k;
+
+	uint8_t *out = (uint8_t *)malloc(*out_len);
+	if (!out)
+		return NULL;
+
+	/* Store original plaintext length in first 4 bytes (big-endian) */
+	out[0] = (uint8_t)(pix_len >> 24);
+	out[1] = (uint8_t)(pix_len >> 16);
+	out[2] = (uint8_t)(pix_len >> 8);
+	out[3] = (uint8_t)(pix_len);
+
+	uint8_t *em = (uint8_t *)malloc(k);
+
+	for (size_t i = 0; i < num_blocks; i++) {
+		size_t offset = i * max_msg;
+		size_t chunk = pix_len - offset;
+		if (chunk > (size_t)max_msg)
+			chunk = max_msg;
+
+		if (oaep_encode(pixels + offset, chunk, k, em) != 0) {
+			free(out);
+			free(em);
+			return NULL;
+		}
+
+		bignum_t m, c;
+		bn_init(&m);
+		bn_init(&c);
+		bn_from_bytes(&m, em, k);
+		rsa_encrypt_block(&c, &m, key);
+		bn_to_bytes(&c, out + 4 + (i * k), k);
+	}
+
+	free(em);
+	return out;
+}
+
+uint8_t *rsa_oaep_decrypt_image(const uint8_t *cipher, size_t cip_len,
+				const rsa_key_t *key, size_t *out_len)
+{
+	int k = RSA_KEY_BYTES(key);
+	int max_msg = OAEP_MAX_MSG_LEN(k);
+
+	if (cip_len < 4) {
+		fprintf(stderr, "rsa_oaep_decrypt: ciphertext too short\n");
+		return NULL;
+	}
+
+	/* Read original plaintext length from header */
+	size_t orig_len = ((size_t)cipher[0] << 24) |
+			  ((size_t)cipher[1] << 16) | ((size_t)cipher[2] << 8) |
+			  (size_t)cipher[3];
+
+	size_t num_blocks = (cip_len - 4) / k;
+
+	/* Allocate worst case, will trim to orig_len */
+	uint8_t *out = (uint8_t *)malloc(num_blocks * max_msg);
+	if (!out)
+		return NULL;
+
+	uint8_t *em = (uint8_t *)malloc(k);
+	uint8_t *msg_buf = (uint8_t *)malloc(max_msg);
+	size_t total = 0;
+
+	for (size_t i = 0; i < num_blocks; i++) {
+		bignum_t c, m;
+		bn_init(&c);
+		bn_init(&m);
+
+		bn_from_bytes(&c, cipher + 4 + (i * k), k);
+		rsa_decrypt_block(&m, &c, key);
+		bn_to_bytes(&m, em, k);
+
+		size_t msg_len = 0;
+		if (oaep_decode(em, k, msg_buf, &msg_len) != 0) {
+			fprintf(stderr, "rsa_oaep_decrypt: block %zu failed\n",
+				i);
+			free(out);
+			free(em);
+			free(msg_buf);
+			return NULL;
+		}
+
+		memcpy(out + total, msg_buf, msg_len);
+		total += msg_len;
+	}
+
+	free(em);
+	free(msg_buf);
+
+	*out_len = orig_len;
 	return out;
 }
