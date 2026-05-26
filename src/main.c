@@ -1,114 +1,132 @@
 #include "bignum.h"
+#include "oaep.h"
 #include "rsa.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <windows.h>
+
+#define BASE_PATH "C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\"
+#define INPUT_FILE BASE_PATH "Colored_butterfly.png"
 
 double get_time_ms()
 {
 	LARGE_INTEGER freq, now;
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&now);
-
 	return (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+}
+
+uint8_t *read_file(const char *path, size_t *len)
+{
+	FILE *fp = fopen(path, "rb");
+	if (!fp)
+		return NULL;
+	fseek(fp, 0, SEEK_END);
+	*len = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	uint8_t *buf = (uint8_t *)malloc(*len);
+	if (buf)
+		fread(buf, 1, *len, fp);
+	fclose(fp);
+	return buf;
+}
+
+int write_file(const char *path, const uint8_t *data, size_t len)
+{
+	FILE *fp = fopen(path, "wb");
+	if (!fp)
+		return -1;
+	fwrite(data, 1, len, fp);
+	fclose(fp);
+	return 0;
 }
 
 int main(void)
 {
-	printf("Generating keys...\n");
+	size_t file_size;
+	uint8_t *pixels = read_file(INPUT_FILE, &file_size);
+	if (!pixels) {
+		fprintf(stderr, "Failed to open %s\n", INPUT_FILE);
+		return 1;
+	}
+	printf("Read %zu bytes from input image.\n", file_size);
+
+	printf("\nGenerating 512-bit RSA key...\n");
 	rsa_key_t key;
-	if (rsa_keygen(&key, 512) != 0) {
+	if (rsa_keygen(&key, 1024) != 0) {
 		fprintf(stderr, "Key generation failed\n");
 		return 1;
 	}
-	printf("Keys generated.\n");
+	printf("Key generated (%d-bit modulus).\n", key.bits);
 
-	/* Reading Colored_butterfly.png from .. */
+	/* ── Task 1: Raw RSA ────────────────────────────── */
+	printf("\n=== Task 1: Raw RSA ===\n");
+	{
+		double t0 = get_time_ms();
+		size_t enc_len;
+		uint8_t *enc =
+		    rsa_encrypt_image(pixels, file_size, &key, &enc_len);
+		double t1 = get_time_ms();
+		printf("  Encrypt: %.2f ms (%zu bytes)\n", t1 - t0, enc_len);
 
-	FILE *fp =
-	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
-		  "butterfly.png",
-		  "rb");
-	if (!fp) {
-		fprintf(stderr, "Failed to open file\n");
-		return 1;
+		double t2 = get_time_ms();
+		size_t dec_len;
+		uint8_t *dec = rsa_decrypt_image(enc, enc_len, &key, &dec_len);
+		double t3 = get_time_ms();
+		printf("  Decrypt: %.2f ms (%zu bytes)\n", t3 - t2, dec_len);
+
+		int match = (dec_len >= file_size) &&
+			    (memcmp(pixels, dec, file_size) == 0);
+		printf("  Roundtrip: %s\n", match ? "OK" : "MISMATCH");
+
+		write_file(BASE_PATH "raw_encrypted.bin", enc, enc_len);
+		write_file(BASE_PATH "raw_decrypted.png", dec, dec_len);
+
+		free(enc);
+		free(dec);
 	}
 
-	fseek(fp, 0, SEEK_END);
-	size_t file_size = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
+	/* ── Task 2: RSA + OAEP ─────────────────────────── */
+	printf("\n=== Task 2: RSA + OAEP ===\n");
+	{
+		double t0 = get_time_ms();
+		size_t enc_len;
+		uint8_t *enc =
+		    rsa_oaep_encrypt_image(pixels, file_size, &key, &enc_len);
+		double t1 = get_time_ms();
+		if (!enc) {
+			fprintf(stderr, "  OAEP encrypt failed\n");
+			free(pixels);
+			return 1;
+		}
+		printf("  Encrypt: %.2f ms (%zu bytes)\n", t1 - t0, enc_len);
 
-	uint8_t *pixels = (uint8_t *)malloc(file_size);
-	if (!pixels) {
-		fprintf(stderr, "Failed to allocate memory\n");
-		return 1;
-	}
-	if (fread(pixels, 1, file_size, fp) != file_size) {
-		fprintf(stderr, "Failed to read file\n");
-		return 1;
-	}
+		double t2 = get_time_ms();
+		size_t dec_len;
+		uint8_t *dec =
+		    rsa_oaep_decrypt_image(enc, enc_len, &key, &dec_len);
+		double t3 = get_time_ms();
+		if (!dec) {
+			fprintf(stderr, "  OAEP decrypt failed\n");
+			free(enc);
+			free(pixels);
+			return 1;
+		}
+		printf("  Decrypt: %.2f ms (%zu bytes)\n", t3 - t2, dec_len);
 
-	printf("Done reading file.\n");
+		int match = (dec_len == file_size) &&
+			    (memcmp(pixels, dec, file_size) == 0);
+		printf("  Roundtrip: %s\n", match ? "OK" : "MISMATCH");
 
-	fclose(fp);
+		write_file(BASE_PATH "oaep_encrypted.bin", enc, enc_len);
+		write_file(BASE_PATH "oaep_decrypted.png", dec, dec_len);
 
-	double enc_start = get_time_ms();
-	printf("Encrypting image...\n");
-	size_t out_len;
-	uint8_t *cipher = rsa_encrypt_image(pixels, file_size, &key, &out_len);
-	if (!cipher) {
-		fprintf(stderr, "Failed to encrypt image\n");
-		return 1;
-	}
-
-	double enc_end = get_time_ms();
-
-	printf("Done encrypting image in %.2f ms.\n", enc_end - enc_start);
-
-	printf("Decrypting image...\n");
-
-	double dec_start = get_time_ms();
-
-	size_t dec_len;
-	uint8_t *decrypted = rsa_decrypt_image(cipher, out_len, &key, &dec_len);
-	if (!decrypted) {
-		fprintf(stderr, "Failed to decrypt image\n");
-		return 1;
+		free(enc);
+		free(dec);
 	}
 
-	double dec_end = get_time_ms();
-
-	printf("Done decrypting image in %.2f ms.\n", dec_end - dec_start);
-
-	printf("Writing encrypted file...\n");
-	FILE *out_fp =
-	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
-		  "butterfly_encrypted.bin",
-		  "wb");
-	if (!out_fp) {
-		fprintf(stderr, "Failed to open file\n");
-		return 1;
-	}
-	fwrite(cipher, 1, out_len, out_fp);
-	fclose(out_fp);
-	printf("Done writing encrypted file.\n");
-
-	printf("Writing decrypted file...\n");
-	FILE *dec_fp =
-	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
-		  "butterfly_decrypted.png",
-		  "wb");
-	if (!dec_fp) {
-		fprintf(stderr, "Failed to open file\n");
-		return 1;
-	}
-	fwrite(decrypted, 1, dec_len, dec_fp);
-	fclose(dec_fp);
-
-	/* Cleaning up */
 	free(pixels);
-	free(cipher);
-	free(decrypted);
-
+	printf("\nDone.\n");
 	return 0;
 }
