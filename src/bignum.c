@@ -349,8 +349,11 @@ void bn_mul(bignum_t *r, const bignum_t *a, const bignum_t *b)
 			tmp.limbs[i + j] = (uint32_t)(prod & 0xFFFFFFFF);
 			carry = prod >> 32;
 		}
-		if (carry)
-			tmp.limbs[i + b->len] += (uint32_t)carry;
+		for (int k = i + b->len; carry && k < rlen; k++) {
+			uint64_t s = (uint64_t)tmp.limbs[k] + carry;
+			tmp.limbs[k] = (uint32_t)(s & 0xFFFFFFFF);
+			carry = s >> 32;
+		}
 	}
 
 	tmp.sign = a->sign ^ b->sign;
@@ -430,10 +433,13 @@ void bn_divmod(bignum_t *q, bignum_t *r, const bignum_t *a, const bignum_t *b)
 
 void bn_mod(bignum_t *r, const bignum_t *a, const bignum_t *n)
 {
-	bignum_t rem;
-	bn_divmod(NULL, &rem, a, n);
-	if (rem.sign)
-		bn_add(&rem, &rem, n);
+	bignum_t abs_a, rem;
+	bn_init(&rem);
+	bn_copy(&abs_a, a);
+	abs_a.sign = 0;
+	bn_divmod(NULL, &rem, &abs_a, n);
+	if (a->sign && !bn_is_zero(&rem))
+		bn_sub(&rem, n, &rem);
 	bn_copy(r, &rem);
 }
 
@@ -441,6 +447,7 @@ void bn_mod_add(bignum_t *r, const bignum_t *a, const bignum_t *b,
 		const bignum_t *n)
 {
 	bignum_t sum;
+	bn_init(&sum);
 	bn_add(&sum, a, b);
 	bn_mod(r, &sum, n);
 }
@@ -449,6 +456,7 @@ void bn_mod_sub(bignum_t *r, const bignum_t *a, const bignum_t *b,
 		const bignum_t *n)
 {
 	bignum_t diff;
+	bn_init(&diff);
 	bn_sub(&diff, a, b);
 	bn_mod(r, &diff, n);
 }
@@ -457,6 +465,7 @@ void bn_mod_mul(bignum_t *r, const bignum_t *a, const bignum_t *b,
 		const bignum_t *n)
 {
 	bignum_t prod;
+	bn_init(&prod);
 	bn_mul(&prod, a, b);
 	bn_mod(r, &prod, n);
 }
@@ -471,6 +480,8 @@ void bn_mod_exp(bignum_t *r, const bignum_t *base, const bignum_t *exp,
 	}
 
 	bignum_t result, b;
+	bn_init(&result);
+	bn_init(&b);
 	bn_set_word(&result, 1);
 	bn_mod(&b, base, mod);
 
@@ -489,6 +500,9 @@ void bn_mod_exp(bignum_t *r, const bignum_t *base, const bignum_t *exp,
 void bn_gcd(bignum_t *r, const bignum_t *a, const bignum_t *b)
 {
 	bignum_t x, y, tmp;
+	bn_init(&x);
+	bn_init(&y);
+	bn_init(&tmp);
 	bn_copy(&x, a);
 	x.sign = 0;
 	bn_copy(&y, b);
@@ -505,6 +519,13 @@ void bn_gcd(bignum_t *r, const bignum_t *a, const bignum_t *b)
 void bn_mod_inv(bignum_t *r, const bignum_t *a, const bignum_t *n)
 {
 	bignum_t old_r, rr, old_s, s, quotient, tmp, tmp2;
+
+	bn_init(&old_r);
+	bn_init(&rr);
+	bn_init(&s);
+	bn_init(&quotient);
+	bn_init(&tmp);
+	bn_init(&tmp2);
 
 	bn_copy(&old_r, n);
 	bn_mod(&rr, a, n);
@@ -567,7 +588,7 @@ void bn_to_bytes(const bignum_t *a, uint8_t *buf, size_t len)
 		for (int j = 0; j < 4; j++) {
 			size_t byte_idx = (size_t)(i * 4 + j);
 			if (byte_idx >= len)
-				return;
+				break;
 			buf[len - 1 - byte_idx] = (uint8_t)(limb >> (j * 8));
 		}
 	}
@@ -632,6 +653,8 @@ bool bn_is_prime_mr(const bignum_t *n, int rounds)
 		return false;
 
 	bignum_t two, three;
+	bn_init(&two);
+	bn_init(&three);
 	bn_set_word(&two, 2);
 	bn_set_word(&three, 3);
 
@@ -653,6 +676,9 @@ bool bn_is_prime_mr(const bignum_t *n, int rounds)
 
 	/* Write n-1 = 2^s * d where d is odd */
 	bignum_t n_minus_1, d, one;
+	bn_init(&n_minus_1);
+	bn_init(&d);
+	bn_init(&one);
 	bn_set_word(&one, 1);
 	bn_sub(&n_minus_1, n, &one);
 	bn_copy(&d, &n_minus_1);
@@ -673,6 +699,7 @@ bool bn_is_prime_mr(const bignum_t *n, int rounds)
 		} while (bn_cmp(&a, &two) < 0 || bn_cmp(&a, &n_minus_1) >= 0);
 
 		bignum_t x;
+		bn_init(&x);
 		bn_mod_exp(&x, &a, &d, n);
 
 		if (bn_is_one(&x) || bn_cmp(&x, &n_minus_1) == 0)

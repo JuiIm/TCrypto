@@ -2,7 +2,7 @@ SRC_DIR = src
 BUILD_DIR = build
 
 CC = gcc
-CFLAGS = -Wall -Iinclude
+CFLAGS = -Wall -Iinclude -g
 LDFLAGS = -lssl -lcrypto
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)

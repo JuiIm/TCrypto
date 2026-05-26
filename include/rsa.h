@@ -17,7 +17,7 @@ typedef struct {
 	int bits;      /* Key size in bits                  */
 } rsa_key_t;
 
-#define RSA_KEY_BYTES(key) ((key)->bits / 8)
+#define RSA_KEY_BYTES(key) (((key)->bits + 7) / 8)
 
 #define RSA_RAW_BLOCK_SIZE(key) (RSA_KEY_BYTES(key) - 1)
 

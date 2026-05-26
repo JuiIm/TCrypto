@@ -1,88 +1,114 @@
 #include "bignum.h"
+#include "rsa.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
 
-static int pass = 0, fail = 0;
-
-static void check(const char *name, const bignum_t *got, const char *hex)
+double get_time_ms()
 {
-	bignum_t exp;
-	bn_from_hex(&exp, hex);
-	if (bn_cmp_abs(got, &exp) == 0) {
-		pass++;
-	} else {
-		printf("  FAIL: %s\n", name);
-		fail++;
-	}
-}
+	LARGE_INTEGER freq, now;
+	QueryPerformanceFrequency(&freq);
+	QueryPerformanceCounter(&now);
 
-static void chk(const char *name, int got, int expected)
-{
-	if (got == expected) {
-		pass++;
-	} else {
-		printf("  FAIL: %s (got %d)\n", name, got);
-		fail++;
-	}
+	return (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
 }
 
 int main(void)
 {
-	bignum_t a, b, r;
+	printf("Generating keys...\n");
+	rsa_key_t key;
+	if (rsa_keygen(&key, 512) != 0) {
+		fprintf(stderr, "Key generation failed\n");
+		return 1;
+	}
+	printf("Keys generated.\n");
 
-	/* Arithmetic */
-	bn_set_word(&a, 0xFFFFFFFF);
-	bn_set_word(&b, 1);
-	bn_add(&r, &a, &b);
-	check("add carry", &r, "100000000");
+	/* Reading Colored_butterfly.png from .. */
 
-	bn_from_hex(&a, "100000000");
-	bn_set_word(&b, 1);
-	bn_sub(&r, &a, &b);
-	check("sub borrow", &r, "FFFFFFFF");
+	FILE *fp =
+	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
+		  "butterfly.png",
+		  "rb");
+	if (!fp) {
+		fprintf(stderr, "Failed to open file\n");
+		return 1;
+	}
 
-	bn_set_word(&a, 0xFFFFFFFF);
-	bn_set_word(&b, 0xFFFFFFFF);
-	bn_mul(&r, &a, &b);
-	check("mul carry", &r, "FFFFFFFE00000001");
+	fseek(fp, 0, SEEK_END);
+	size_t file_size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
 
-	/* Division */
-	bn_set_word(&a, 1000000);
-	bn_set_word(&b, 127);
-	bignum_t q;
-	bn_divmod(&q, &r, &a, &b);
-	bignum_t v;
-	bn_mul(&v, &q, &b);
-	bn_add(&v, &v, &r);
-	check("q*b+r==a", &v, "F4240");
+	uint8_t *pixels = (uint8_t *)malloc(file_size);
+	if (!pixels) {
+		fprintf(stderr, "Failed to allocate memory\n");
+		return 1;
+	}
+	if (fread(pixels, 1, file_size, fp) != file_size) {
+		fprintf(stderr, "Failed to read file\n");
+		return 1;
+	}
 
-	/* Mod exp (RSA) */
-	bn_set_word(&a, 42);
-	bn_set_word(&b, 17);
-	bignum_t n;
-	bn_set_word(&n, 3233);
-	bn_mod_exp(&r, &a, &b, &n);
-	check("RSA enc", &r, "9FD");
-	bn_set_word(&b, 2753);
-	bn_mod_exp(&r, &r, &b, &n);
-	check("RSA dec", &r, "2A");
+	printf("Done reading file.\n");
 
-	/* Mod inverse */
-	bn_set_word(&a, 17);
-	bn_set_word(&n, 3120);
-	bn_mod_inv(&r, &a, &n);
-	check("mod_inv", &r, "AC1");
+	fclose(fp);
 
-	/* Primality */
-	bn_set_word(&a, 65537);
-	chk("65537 prime", bn_is_prime_mr(&a, 20), 1);
-	bn_set_word(&a, 65536);
-	chk("65536 composite", bn_is_prime_mr(&a, 20), 0);
+	double enc_start = get_time_ms();
+	printf("Encrypting image...\n");
+	size_t out_len;
+	uint8_t *cipher = rsa_encrypt_image(pixels, file_size, &key, &out_len);
+	if (!cipher) {
+		fprintf(stderr, "Failed to encrypt image\n");
+		return 1;
+	}
 
-	/* Prime generation */
-	bn_gen_prime(&a, 64);
-	chk("gen 64-bit prime", bn_is_prime_mr(&a, 20), 1);
-	chk("gen 64-bit len", bn_bit_len(&a), 64);
+	double enc_end = get_time_ms();
 
-	printf("%d passed, %d failed\n", pass, fail);
-	return fail > 0 ? 1 : 0;
+	printf("Done encrypting image in %.2f ms.\n", enc_end - enc_start);
+
+	printf("Decrypting image...\n");
+
+	double dec_start = get_time_ms();
+
+	size_t dec_len;
+	uint8_t *decrypted = rsa_decrypt_image(cipher, out_len, &key, &dec_len);
+	if (!decrypted) {
+		fprintf(stderr, "Failed to decrypt image\n");
+		return 1;
+	}
+
+	double dec_end = get_time_ms();
+
+	printf("Done decrypting image in %.2f ms.\n", dec_end - dec_start);
+
+	printf("Writing encrypted file...\n");
+	FILE *out_fp =
+	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
+		  "butterfly_encrypted.bin",
+		  "wb");
+	if (!out_fp) {
+		fprintf(stderr, "Failed to open file\n");
+		return 1;
+	}
+	fwrite(cipher, 1, out_len, out_fp);
+	fclose(out_fp);
+	printf("Done writing encrypted file.\n");
+
+	printf("Writing decrypted file...\n");
+	FILE *dec_fp =
+	    fopen("C:\\Users\\Codename\\Documents\\code\\TCryptoNew\\Colored_"
+		  "butterfly_decrypted.png",
+		  "wb");
+	if (!dec_fp) {
+		fprintf(stderr, "Failed to open file\n");
+		return 1;
+	}
+	fwrite(decrypted, 1, dec_len, dec_fp);
+	fclose(dec_fp);
+
+	/* Cleaning up */
+	free(pixels);
+	free(cipher);
+	free(decrypted);
+
+	return 0;
 }
