@@ -1,3 +1,5 @@
+#import "@preview/codly:1.3.0": *
+#import "@preview/codly-languages:0.1.1": *
 #set page(margin: (x: 1.6cm, y: 1.4cm), numbering: "1", columns: 2)
 #set text(font: "New Computer Modern", size: 9pt)
 #set par(justify: true, leading: 0.5em)
@@ -8,6 +10,7 @@
 #set figure(gap: 6pt)
 #show raw.where(block: true): set text(size: 7pt)
 #show table: set text(size: 8pt)
+#show: codly-init.with()
 
 #place(top + center, scope: "parent", float: true)[
   #align(center)[
