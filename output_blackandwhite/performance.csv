@@ -1,0 +1,13 @@
+task,operation,time_ms,data_size_bytes,key_bits
+png_task1,encrypt,2981.42,69479,1024
+png_task1,decrypt,81067.32,69479,1024
+png_task2,encrypt,6052.90,69479,1024
+png_task2,decrypt,166525.57,69479,1024
+png_task3,encrypt,6.98,69479,1024
+png_task3,decrypt,153.27,69479,1024
+bmp_task1,encrypt,8195.74,193305,1024
+bmp_task1,decrypt,221715.30,193305,1024
+bmp_task2,encrypt,17058.58,193305,1024
+bmp_task2,decrypt,460843.39,193305,1024
+bmp_task3,encrypt,6.64,193305,1024
+bmp_task3,decrypt,153.65,193305,1024
