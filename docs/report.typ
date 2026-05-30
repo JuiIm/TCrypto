@@ -210,18 +210,22 @@ All metrics below are computed on BMP pixel data to ensure analysis operates on 
   caption: [Original image: peaked, non-uniform pixel distribution across all channels.]
 ) <fig-hist-orig>
 
-@fig-hist-enc compares the encrypted histograms. Task 1 (Raw RSA) shows residual spikes because deterministic RSA maps identical plaintext blocks to identical ciphertext blocks, leaking statistical patterns. Tasks 2 and 3 achieve near perfectly flat distributions, confirming that OAEP's randomization eliminates this weakness.
+The following histograms show how each task transforms the pixel value distribution.
 
 #figure(
-  grid(
-    columns: 1,
-    column-gutter: 2mm,
-    image("../output_colored/plots/histogram_task1.png", width: 100%),
-    image("../output_colored/plots/histogram_task2.png", width: 100%),
-    image("../output_colored/plots/histogram_task3.png", width: 100%),
-  ),
-  caption: [Encrypted histograms: Task 1 (left) retains spikes; Tasks 2 (center) and 3 (right) are flat.]
-) <fig-hist-enc>
+  image("../output_colored/plots/histogram_task1.png", width: 100%),
+  caption: [Task 1 (Raw RSA): visible spikes remain in the distribution. Deterministic RSA maps identical plaintext blocks to identical ciphertext, preserving statistical patterns from the original image.]
+) <fig-hist-t1>
+
+#figure(
+  image("../output_colored/plots/histogram_task2.png", width: 100%),
+  caption: [Task 2 (RSA+OAEP): near-uniform distribution. OAEP injects a random seed before each encryption, so identical blocks produce different ciphertexts, eliminating the pattern leakage seen in Task 1.]
+) <fig-hist-t2>
+
+#figure(
+  image("../output_colored/plots/histogram_task3.png", width: 100%),
+  caption: [Task 3 (Hybrid AES): equally flat distribution as Task 2. AES-CBC's chaining mode propagates changes across blocks, achieving strong diffusion with near-ideal uniformity.]
+) <fig-hist-t3>
 
 == Entropy
 
