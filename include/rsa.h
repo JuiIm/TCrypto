@@ -43,4 +43,12 @@ uint8_t *rsa_oaep_encrypt_image(const uint8_t *pixels, size_t pix_len,
 uint8_t *rsa_oaep_decrypt_image(const uint8_t *cipher, size_t cip_len,
 				const rsa_key_t *key, size_t *out_len);
 
+/*
+ * Build an RSA key from known hex-encoded primes and exponent.
+ * Computes n, d, dp, dq, qinv automatically.
+ * Returns 0 on success, -1 on error.
+ */
+int rsa_key_from_hex(rsa_key_t *key, const char *p_hex, const char *q_hex,
+		     const char *e_hex);
+
 #endif /* RSA_H */

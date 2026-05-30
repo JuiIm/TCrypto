@@ -325,3 +325,55 @@ uint8_t *rsa_oaep_decrypt_image(const uint8_t *cipher, size_t cip_len,
 	*out_len = orig_len;
 	return out;
 }
+
+int rsa_key_from_hex(rsa_key_t *key, const char *p_hex, const char *q_hex,
+		     const char *e_hex)
+{
+	bn_init(&key->p);
+	bn_init(&key->q);
+	bn_init(&key->n);
+	bn_init(&key->e);
+	bn_init(&key->d);
+	bn_init(&key->dp);
+	bn_init(&key->dq);
+	bn_init(&key->qinv);
+
+	bn_from_hex(&key->p, p_hex);
+	bn_from_hex(&key->q, q_hex);
+	bn_from_hex(&key->e, e_hex);
+
+	/* n = p * q */
+	bn_mul(&key->n, &key->p, &key->q);
+	key->bits = bn_bit_len(&key->n);
+
+	/* phi = (p-1)(q-1) */
+	bignum_t p1, q1, phi, gcd;
+	bn_init(&p1);
+	bn_init(&q1);
+	bn_init(&phi);
+	bn_init(&gcd);
+
+	bn_set_word(&p1, 1);
+	bn_set_word(&q1, 1);
+	bn_sub(&p1, &key->p, &p1);
+	bn_sub(&q1, &key->q, &q1);
+	bn_mul(&phi, &p1, &q1);
+
+	/* Verify gcd(e, phi) == 1 */
+	bn_gcd(&gcd, &key->e, &phi);
+	if (!bn_is_one(&gcd)) {
+		fprintf(stderr,
+			"rsa_key_from_hex: e is not coprime with phi(n)\n");
+		return -1;
+	}
+
+	/* d = e^-1 mod phi */
+	bn_mod_inv(&key->d, &key->e, &phi);
+
+	/* CRT: dp = d mod (p-1), dq = d mod (q-1), qinv = q^-1 mod p */
+	bn_mod(&key->dp, &key->d, &p1);
+	bn_mod(&key->dq, &key->d, &q1);
+	bn_mod_inv(&key->qinv, &key->q, &key->p);
+
+	return 0;
+}

@@ -22,6 +22,7 @@ void bn_set_word(bignum_t *a, uint32_t w);
 void bn_from_bytes(bignum_t *a, const uint8_t *buf, size_t len);
 void bn_to_bytes(const bignum_t *a, uint8_t *buf, size_t len);
 void bn_from_hex(bignum_t *a, const char *hex);
+char *bn_to_hex_str(const bignum_t *a);
 void bn_print_hex(const bignum_t *a);
 
 int bn_cmp(const bignum_t *a, const bignum_t *b);

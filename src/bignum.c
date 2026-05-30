@@ -727,3 +727,20 @@ void bn_gen_prime(bignum_t *p, int bits)
 		p->limbs[0] |= 1; /* ensure odd */
 	} while (!bn_is_prime_mr(p, 40));
 }
+
+char *bn_to_hex_str(const bignum_t *a)
+{
+	int nbytes = (bn_bit_len(a) + 7) / 8;
+	if (nbytes == 0)
+		nbytes = 1;
+	uint8_t *buf = calloc(nbytes, 1);
+	bn_to_bytes(a, buf, nbytes);
+
+	char *hex = malloc(nbytes * 2 + 1);
+	for (int i = 0; i < nbytes; i++)
+		sprintf(hex + i * 2, "%02x", buf[i]);
+	hex[nbytes * 2] = '\0';
+
+	free(buf);
+	return hex;
+}
