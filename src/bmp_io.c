@@ -1,3 +1,8 @@
+/*
+ * bmp_io.c — Read/write 24-bit BMP files.
+ * Converts BGR (BMP native) <-> RGB on load/save.
+ * Row stride is padded to 4-byte boundary per BMP spec.
+ */
 #include "bmp_io.h"
 #include <stdio.h>
 #include <stdlib.h>

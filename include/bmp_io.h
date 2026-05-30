@@ -1,3 +1,7 @@
+/*
+ * bmp_io.h — Load/save 24-bit BMP images for pixel-level analysis.
+ * Handles BGR<->RGB conversion and row padding automatically.
+ */
 #ifndef BMP_IO_H
 #define BMP_IO_H
 

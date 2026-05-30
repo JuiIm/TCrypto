@@ -1,3 +1,12 @@
+/*
+ * main.c — Benchmark runner for all three encryption tasks.
+ *
+ * Runs Task 1 (Raw RSA), Task 2 (RSA+OAEP), and Task 3 (Hybrid AES)
+ * on both PNG file bytes and BMP raw pixels. Outputs timing to
+ * performance.csv and encrypted BMP images for security analysis.
+ *
+ * Run with: make run
+ */
 #include "aes_cbc.h"
 #include "bignum.h"
 #include "bmp_io.h"

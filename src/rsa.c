@@ -1,3 +1,11 @@
+/*
+ * rsa.c — RSA key generation, block encrypt/decrypt, and image-level wrappers.
+ *
+ * Key generation: random primes via Miller-Rabin, e=65537, CRT params.
+ * Decryption uses CRT for ~4x speedup over naive c^d mod n.
+ * Image functions split data into blocks, encrypt/decrypt each, and
+ * store a 4-byte big-endian length header for correct reconstruction.
+ */
 #include "rsa.h"
 #include "bignum.h"
 #include "oaep.h"

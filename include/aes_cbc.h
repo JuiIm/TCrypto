@@ -1,3 +1,7 @@
+/*
+ * aes_cbc.h — AES-256-CBC encryption/decryption wrapper around OpenSSL EVP.
+ * Used in Task 3 (hybrid encryption) for fast bulk image encryption.
+ */
 #ifndef AES_CBC_H
 #define AES_CBC_H
 

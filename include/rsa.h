@@ -1,3 +1,7 @@
+/*
+ * rsa.h — RSA encryption/decryption with CRT optimization.
+ * Supports raw RSA (Task 1), RSA+OAEP (Task 2), and key import from hex.
+ */
 #ifndef RSA_H
 #define RSA_H
 

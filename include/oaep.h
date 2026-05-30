@@ -1,3 +1,8 @@
+/*
+ * oaep.h — PKCS#1 v2.2 OAEP padding (SHA-256 + MGF1).
+ * Provides semantic security: identical plaintexts produce
+ * different ciphertexts thanks to a random seed.
+ */
 #ifndef OAEP_H
 #define OAEP_H
 

@@ -1,3 +1,12 @@
+/*
+ * bignum.c — Arbitrary-precision integer library.
+ *
+ * Implements schoolbook multiplication, restoring division, left-to-right
+ * modular exponentiation, Extended Euclidean GCD for modular inverse,
+ * and Miller-Rabin primality testing with trial division.
+ *
+ * Random bytes come from OpenSSL's RAND_bytes (CSPRNG).
+ */
 #include "bignum.h"
 #include <openssl/rand.h>
 #include <stdio.h>

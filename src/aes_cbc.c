@@ -1,3 +1,7 @@
+/*
+ * aes_cbc.c — AES-256-CBC via OpenSSL EVP.
+ * Handles PKCS#7 padding internally. Key/IV generated with RAND_bytes.
+ */
 #include "aes_cbc.h"
 #include <openssl/evp.h>
 #include <openssl/rand.h>

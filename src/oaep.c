@@ -1,3 +1,10 @@
+/*
+ * oaep.c — OAEP encode/decode (PKCS#1 v2.2).
+ *
+ * Encode: DB = lHash || PS || 0x01 || M, then double-mask with MGF1.
+ * Decode: reverse the masking, verify lHash, extract message.
+ * SHA-256 is used for both hashing and MGF1.
+ */
 #include "oaep.h"
 #include <openssl/evp.h>
 #include <openssl/rand.h>

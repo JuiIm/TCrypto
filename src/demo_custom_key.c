@@ -1,3 +1,8 @@
+/*
+ * demo_custom_key.c — Demo: build an RSA key from hex primes.
+ * Generates a key, exports p/q as hex, rebuilds from hex, and
+ * verifies encrypt/decrypt roundtrip. Run with: make test
+ */
 #include "bignum.h"
 #include "rsa.h"
 #include <stdio.h>
